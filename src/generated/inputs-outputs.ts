@@ -52,6 +52,7 @@ export enum Inputs {
      * Default: None.
      */
     USERNAME = "username",
+    COMPRESSION_FORMATS = "compression-formats",
 }
 
 export enum Outputs {
