@@ -116,7 +116,7 @@ async function run(): Promise<void> {
         const manifestListImages = [];
 
         for (const format of compressionFormats) {
-            const formatImage = getFullImageName(sourceImages[0], format.replace(":", "-"));
+            const formatImage = sourceImages[0] + format.replace(":", "-");
             core.info(`Pushing image ${formatImage}`);
             await execute(await getPodmanPath(), [
                 "--version",

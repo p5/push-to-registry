@@ -78,7 +78,7 @@ async function run() {
         core.info(`Manifest list name: ${manifestListName}`);
         const manifestListImages = [];
         for (const format of compressionFormats) {
-            const formatImage = (0, util_1.getFullImageName)(sourceImages[0], format.replace(":", "-"));
+            const formatImage = sourceImages[0] + format.replace(":", "-");
             core.info(`Pushing image ${formatImage}`);
             await execute(await getPodmanPath(), [
                 "--version",
