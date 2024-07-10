@@ -93,8 +93,8 @@ async function run(): Promise<void> {
         core.info(`Combining image name "${normalizedImage}" and registry "${registry}" `
             + `to form registry path "${registryPath}"`);
         if (normalizedImage.indexOf("/") > -1 && registry.indexOf("/") > -1) {
-            core.warning(`"${registryPath}" does not seem to be a valid registry path. `
-            + `The registry path should not contain more than 2 slashes. `
+            core.warning(`"${registryPath}" does not seem to be a typical registry path. `
+            + `Select few registries support paths containing more than two slashes. `
             + `Refer to the Inputs section of the readme for naming image and registry.`);
         }
 
