@@ -78,6 +78,7 @@ async function run(): Promise<void> {
             registry,
             normalizedTagsList,
         ));
+        core.info(`Source images: ${sourceImages.join(", ")}`);
     }
     else {
         if (normalizedImage) {
@@ -470,7 +471,7 @@ function processImageAndRegistryPaths(
         + `Refer to the Inputs section of the readme for naming image and registry.`);
     }
 
-    sourceImages = tagsList.map((tag) => getFullImageName(normalizedImage, tag));
+    const sourceImages = tagsList.map((tag) => getFullImageName(normalizedImage, tag));
     const destinationImages = tagsList.map((tag) => getFullImageName(registryPath, tag));
 
     return { sourceImages, destinationImages };

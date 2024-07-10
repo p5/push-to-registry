@@ -47,6 +47,7 @@ async function run() {
             throw new Error(`Input "${inputs_outputs_1.Inputs.REGISTRY}" must be provided when using non full name tags`);
         }
         ({ sourceImages, destinationImages } = processImageAndRegistryPaths(normalizedImage, registry, normalizedTagsList));
+        core.info(`Source images: ${sourceImages.join(", ")}`);
     }
     else {
         if (normalizedImage) {
@@ -347,7 +348,7 @@ function processImageAndRegistryPaths(normalizedImage, registry, tagsList) {
             + `Select few registries support paths containing more than two slashes. `
             + `Refer to the Inputs section of the readme for naming image and registry.`);
     }
-    sourceImages = tagsList.map((tag) => (0, util_1.getFullImageName)(normalizedImage, tag));
+    const sourceImages = tagsList.map((tag) => (0, util_1.getFullImageName)(normalizedImage, tag));
     const destinationImages = tagsList.map((tag) => (0, util_1.getFullImageName)(registryPath, tag));
     return { sourceImages, destinationImages };
 }
