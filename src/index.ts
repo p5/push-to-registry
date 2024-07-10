@@ -7,6 +7,7 @@ import * as path from "path";
 import {
     isStorageDriverOverlay, findFuseOverlayfsPath,
     splitByNewline,
+    splitByWhitespace,
     isFullImageName, getFullImageName,
     getFullDockerImageName,
 } from "./util";
@@ -91,7 +92,7 @@ async function run(): Promise<void> {
     }
 
     const compressionFormatsRaw = core.getInput(Inputs.COMPRESSION_FORMATS);
-    const compressionFormats = splitByNewline(compressionFormatsRaw);
+    const compressionFormats = splitByWhitespace(compressionFormatsRaw);
 
     if (compressionFormats.length > 0) {
         core.info(`Compression formats: ${compressionFormats.join(", ")}`);

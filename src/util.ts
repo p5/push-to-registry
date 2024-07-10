@@ -66,6 +66,10 @@ export function splitByNewline(s: string): string[] {
     return s.split(/\r?\n/);
 }
 
+export function splitByWhitespace(s: string): string[] {
+    return s.split(/\s/);
+}
+
 export function isFullImageName(image: string): boolean {
     return image.indexOf(":") > 0;
 }

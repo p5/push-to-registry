@@ -4,7 +4,7 @@
  *  Licensed under the MIT License. See LICENSE file in the project root for license information.
  **************************************************************************************************/
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getFullDockerImageName = exports.getFullImageName = exports.isFullImageName = exports.splitByNewline = exports.findFuseOverlayfsPath = exports.isStorageDriverOverlay = void 0;
+exports.getFullDockerImageName = exports.getFullImageName = exports.isFullImageName = exports.splitByWhitespace = exports.splitByNewline = exports.findFuseOverlayfsPath = exports.isStorageDriverOverlay = void 0;
 const ini = require("ini");
 const fs_1 = require("fs");
 const core = require("@actions/core");
@@ -64,6 +64,10 @@ function splitByNewline(s) {
     return s.split(/\r?\n/);
 }
 exports.splitByNewline = splitByNewline;
+function splitByWhitespace(s) {
+    return s.split(/\s/);
+}
+exports.splitByWhitespace = splitByWhitespace;
 function isFullImageName(image) {
     return image.indexOf(":") > 0;
 }

@@ -59,7 +59,7 @@ async function run() {
         destinationImages = normalizedTagsList;
     }
     const compressionFormatsRaw = core.getInput(inputs_outputs_1.Inputs.COMPRESSION_FORMATS);
-    const compressionFormats = (0, util_1.splitByNewline)(compressionFormatsRaw);
+    const compressionFormats = (0, util_1.splitByWhitespace)(compressionFormatsRaw);
     if (compressionFormats.length > 0) {
         core.info(`Compression formats: ${compressionFormats.join(", ")}`);
     }
