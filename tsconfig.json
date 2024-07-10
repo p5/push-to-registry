@@ -2,7 +2,7 @@
     "extends": "@redhat-actions/tsconfig",
     "compilerOptions": {
       "rootDir": "src/",
-      "outDir": "out/"
+      "outDir": "dist/"
     },
     "include": [
       "src/"
