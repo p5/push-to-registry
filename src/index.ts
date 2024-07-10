@@ -112,6 +112,7 @@ async function run(): Promise<void> {
         core.info(`Pushing images to the registry with the <image>-<format> tag`);
 
         const manifestListName = sourceImages[0];
+        core.info(`Manifest list name: ${manifestListName}`);
         const manifestListImages = [];
 
         for (const format of compressionFormats) {
