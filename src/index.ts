@@ -87,7 +87,8 @@ async function run(): Promise<void> {
             throw new Error(`Input "${Inputs.REGISTRY}" must be provided when using non full name tags`);
         }
 
-        const registryWithoutTrailingSlash = registry.replace(/\/$/, "");
+        const normalizedRegistry = registry.toLowerCase();
+        const registryWithoutTrailingSlash = normalizedRegistry.replace(/\/$/, "");
         const registryPath = `${registryWithoutTrailingSlash}/${normalizedImage}`;
         core.info(`Combining image name "${normalizedImage}" and registry "${registry}" `
             + `to form registry path "${registryPath}"`);
