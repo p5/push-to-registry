@@ -33,6 +33,12 @@ inputs:
       By default, the filename will be determined from the image and tag.
       The contents of this file are the digest output.
     required: false
+  compression-formats:
+    description: |
+      The compression formats to use when pushing the image.
+      Separate formats by whitespace. For example, "gzip zstd zstd:chunked".
+    default: 'gzip'
+    required: false
   extra-args:
     description: |
       Extra args to be passed to podman push.

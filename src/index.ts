@@ -26,9 +26,7 @@ interface ImageStorageCheckResult {
 let podmanPath: string | undefined;
 
 // boolean value to check if pushed image is from Docker image storage
-let isImageFromDocker = false;
 let sourceImages: string[];
-let destinationImages: string[];
 let dockerPodmanRoot: string;
 let dockerPodmanOpts: string[];
 
@@ -45,24 +43,12 @@ async function run(): Promise<void> {
     const DEFAULT_TAG = "latest";
     const image = core.getInput(Inputs.IMAGE);
     const tags = core.getInput(Inputs.TAGS);
-    // split tags
-    const tagsList = tags.trim().split(/\s+/);
 
-    // info message if user doesn't provides any tag
-    if (tagsList.length === 0) {
-        core.info(`Input "${Inputs.TAGS}" is not provided, using default tag "${DEFAULT_TAG}"`);
-        tagsList.push(DEFAULT_TAG);
-    }
+    const tagsList = getTagsList(tags, DEFAULT_TAG);
 
-    const normalizedTagsList: string[] = [];
-    let isNormalized = false;
-    for (const tag of tagsList) {
-        normalizedTagsList.push(tag.toLowerCase());
-        if (tag.toLowerCase() !== tag) {
-            isNormalized = true;
-        }
-    }
+    const { normalizedTagsList, isNormalized } = normalizeTags(tagsList);
     const normalizedImage = image.toLowerCase();
+
     if (isNormalized || image !== normalizedImage) {
         core.warning(`Reference to image and/or tag must be lowercase.`
         + ` Reference has been converted to be compliant with standard.`);
@@ -74,11 +60,10 @@ async function run(): Promise<void> {
     const tlsVerify = core.getInput(Inputs.TLS_VERIFY);
     const digestFileInput = core.getInput(Inputs.DIGESTFILE);
 
-    // check if all tags provided are in `image:tag` format
     const isFullImageNameTag = isFullImageName(normalizedTagsList[0]);
-    if (normalizedTagsList.some((tag) => isFullImageName(tag) !== isFullImageNameTag)) {
-        throw new Error(`Input "${Inputs.TAGS}" cannot have a mix of full name and non full name tags`);
-    }
+    validateTags(normalizedTagsList, isFullImageNameTag);
+
+    let destinationImages: string[];
     if (!isFullImageNameTag) {
         if (!normalizedImage) {
             throw new Error(`Input "${Inputs.IMAGE}" must be provided when using non full name tags`);
@@ -87,18 +72,11 @@ async function run(): Promise<void> {
             throw new Error(`Input "${Inputs.REGISTRY}" must be provided when using non full name tags`);
         }
 
-        const registryWithoutTrailingSlash = registry.replace(/\/$/, "");
-        const registryPath = `${registryWithoutTrailingSlash}/${normalizedImage}`;
-        core.info(`Combining image name "${normalizedImage}" and registry "${registry}" `
-            + `to form registry path "${registryPath}"`);
-        if (normalizedImage.indexOf("/") > -1 && registry.indexOf("/") > -1) {
-            core.warning(`"${registryPath}" does not seem to be a valid registry path. `
-            + `The registry path should not contain more than 2 slashes. `
-            + `Refer to the Inputs section of the readme for naming image and registry.`);
-        }
-
-        sourceImages = normalizedTagsList.map((tag) => getFullImageName(normalizedImage, tag));
-        destinationImages = normalizedTagsList.map((tag) => getFullImageName(registryPath, tag));
+        ({ sourceImages, destinationImages } = processImageAndRegistryPaths(
+            normalizedImage,
+            registry,
+            normalizedTagsList,
+        ));
     }
     else {
         if (normalizedImage) {
@@ -112,22 +90,70 @@ async function run(): Promise<void> {
         destinationImages = normalizedTagsList;
     }
 
-    const inputExtraArgsStr = core.getInput(Inputs.EXTRA_ARGS);
-    let podmanExtraArgs: string[] = [];
-    if (inputExtraArgsStr) {
-        // transform the array of lines into an array of arguments
-        // by splitting over lines, then over spaces, then trimming.
-        const lines = splitByNewline(inputExtraArgsStr);
-        podmanExtraArgs = lines.flatMap((line) => line.split(" ")).map((arg) => arg.trim());
+    const compressionFormatsRaw = core.getInput(Inputs.COMPRESSION_FORMATS);
+    const compressionFormats = splitByNewline(compressionFormatsRaw);
+
+    if (compressionFormats.length > 0) {
+        core.info(`Compression formats: ${compressionFormats.join(", ")}`);
     }
 
-    const registryPathList: string[] = [];
-    // here
-    // check if provided image is manifest or not
+    // If a single compression format, continue.  Otherwise we need to:
+    // 1. Push images to the registry with the <image>-<format> tag
+    // 2. Create a manifest list called <image>
+    // 3. Add the <image>-<format> tags to the manifest list
+    // 4. Push the manifest list to the registry
+    // 5. Exit out of the action
+
+    let isManagedManifest = false;
+    if (compressionFormats.length > 1) {
+        core.info(`Multiple compression formats detected`);
+        core.info(`Pushing images to the registry with the <image>-<format> tag`);
+
+        const manifestListName = sourceImages[0];
+        const manifestListImages = [];
+
+        for (const format of compressionFormats) {
+            const formatTag = `${sourceImages[0]}-${format}`;
+            const formatImage = getFullImageName(sourceImages[0], formatTag);
+            core.info(`Pushing image ${formatImage}`);
+            await execute(await getPodmanPath(), [
+                "--compression-format " + format,
+                "push",
+                sourceImages[0],
+                formatImage,
+            ]);
+            manifestListImages.push({
+                format,
+                manifestImage: formatImage,
+            });
+        }
+
+        core.info(`Creating manifest list ${manifestListName}`);
+        await execute(await getPodmanPath(), [
+            "manifest", "create", manifestListName,
+        ]);
+
+        // If format starts with "zstd", we need to add an annotation to the manifest list entry
+        for (const { format, manifestImage } of manifestListImages) {
+            core.info(`Adding ${manifestImage} to manifest list ${manifestListName} with format ${format}`);
+            const annotation = format.startsWith("zstd")
+                ? `--annotation=io.github.containers.compression.zstd=true`
+                : "";
+            await execute(await getPodmanPath(), [
+                "manifest", "add", manifestListName, manifestImage, annotation,
+            ]);
+        }
+
+        isManagedManifest = true;
+    }
+
+    const inputExtraArgsStr = core.getInput(Inputs.EXTRA_ARGS);
+    const podmanExtraArgs = parsePodmanExtraArgs(inputExtraArgsStr);
+
     const isManifest = await checkIfManifestsExists();
+    let isImageFromDocker = false;
 
     if (!isManifest) {
-        // check if image with all the required tags exist in Podman image storage
         const podmanImageStorageCheckResult: ImageStorageCheckResult = await checkImageInPodman();
 
         const podmanFoundTags: string[] = podmanImageStorageCheckResult.foundTags;
@@ -138,14 +164,11 @@ async function run(): Promise<void> {
             + `found in Podman image storage`);
         }
 
-        // Log warning if few tags are not found
         if (podmanMissingTags.length > 0 && podmanFoundTags.length > 0) {
             core.warning(`Tag${podmanMissingTags.length !== 1 ? "s" : ""} "${podmanMissingTags.join(", ")}" `
             + `not found in Podman image storage`);
         }
 
-        // check if image with all the required tags exist in Docker image storage
-        // and if exist pull the image with all the tags to Podman
         const dockerImageStorageCheckResult: ImageStorageCheckResult = await pullImageFromDocker();
 
         const dockerFoundTags: string[] = dockerImageStorageCheckResult.foundTags;
@@ -156,13 +179,11 @@ async function run(): Promise<void> {
             + `found in Docker image storage`);
         }
 
-        // Log warning if few tags are not found
         if (dockerMissingTags.length > 0 && dockerFoundTags.length > 0) {
             core.warning(`Tag${dockerMissingTags.length !== 1 ? "s" : ""} "${dockerMissingTags.join(", ")}" `
             + `not found in Docker image storage`);
         }
 
-        // failing if image with any of the tag is not found in Docker as well as Podman
         if (podmanMissingTags.length > 0 && dockerMissingTags.length > 0) {
             throw new Error(
                 `❌ All tags were not found in either Podman image storage, or Docker image storage. `
@@ -209,22 +230,9 @@ async function run(): Promise<void> {
         }
     }
 
-    let pushMsg = `⏳ Pushing "${sourceImages.join(", ")}" to "${destinationImages.join(", ")}" respectively`;
-    if (username) {
-        pushMsg += ` as "${username}"`;
-    }
-    core.info(pushMsg);
+    core.info(getPushMessage(destinationImages, username));
 
-    let creds = "";
-    if (username && !password) {
-        core.warning("Username is provided, but password is missing");
-    }
-    else if (!username && password) {
-        core.warning("Password is provided, but username is missing");
-    }
-    else if (username && password) {
-        creds = `${username}:${password}`;
-    }
+    const creds = validateCredentials(username, password);
 
     let digestFile = digestFileInput;
     if (!digestFile) {
@@ -234,60 +242,16 @@ async function run(): Promise<void> {
         )}_digest.txt`;
     }
 
-    // push the image
-    for (let i = 0; i < destinationImages.length; i++) {
-        const args = [];
-        if (isImageFromDocker) {
-            args.push(...dockerPodmanOpts);
-        }
-        if (isManifest) {
-            args.push("manifest");
-        }
-        args.push(...[
-            "push",
-            "--quiet",
-            "--digestfile",
-            digestFile,
-            isImageFromDocker ? getFullDockerImageName(sourceImages[i]) : sourceImages[i],
-            destinationImages[i],
-        ]);
-        // to push all the images referenced in the manifest
-        if (isManifest) {
-            args.push("--all");
-        }
-        if (podmanExtraArgs.length > 0) {
-            args.push(...podmanExtraArgs);
-        }
-
-        // check if tls-verify is not set to null
-        if (tlsVerify) {
-            args.push(`--tls-verify=${tlsVerify}`);
-        }
-
-        // check if registry creds are provided
-        if (creds) {
-            args.push(`--creds=${creds}`);
-        }
-
-        await execute(await getPodmanPath(), args);
-        core.info(`✅ Successfully pushed "${sourceImages[i]}" to "${destinationImages[i]}"`);
-
-        registryPathList.push(destinationImages[i]);
-
-        try {
-            const digest = (await fs.promises.readFile(digestFile)).toString();
-            core.info(digest);
-            // the digest should be the same for every image, but we log it every time
-            // due to https://github.com/redhat-actions/push-to-registry/issues/26
-            core.setOutput(Outputs.DIGEST, digest);
-        }
-        catch (err) {
-            core.warning(`Failed to read digest file "${digestFile}": ${err}`);
-        }
-    }
-
-    core.setOutput(Outputs.REGISTRY_PATH, registryPathList[0]);
-    core.setOutput(Outputs.REGISTRY_PATHS, JSON.stringify(registryPathList));
+    await pushImages(
+        destinationImages,
+        isImageFromDocker,
+        isManifest,
+        !isManagedManifest,
+        podmanExtraArgs,
+        tlsVerify,
+        creds,
+        digestFile
+    );
 }
 
 async function pullImageFromDocker(): Promise<ImageStorageCheckResult> {
@@ -456,6 +420,142 @@ async function checkIfManifestsExists(): Promise<boolean> {
     }
 
     return foundManifests.length === sourceImages.length;
+}
+
+function getTagsList(tags: string, defaultTag: string): string[] {
+    const tagsList = tags.trim().split(/\s+/);
+    if (tagsList.length === 0) {
+        core.info(`Input "${Inputs.TAGS}" is not provided, using default tag "${defaultTag}"`);
+        tagsList.push(defaultTag);
+    }
+    return tagsList;
+}
+
+function normalizeTags(tagsList: string[]): { normalizedTagsList: string[], isNormalized: boolean } {
+    const normalizedTagsList: string[] = [];
+    let isNormalized = false;
+    for (const tag of tagsList) {
+        normalizedTagsList.push(tag.toLowerCase());
+        if (tag.toLowerCase() !== tag) {
+            isNormalized = true;
+        }
+    }
+    return { normalizedTagsList, isNormalized };
+}
+
+function validateTags(tagsList: string[], isFullImageNameTag: boolean): void {
+    if (tagsList.some((tag) => isFullImageName(tag) !== isFullImageNameTag)) {
+        throw new Error(`Input "${Inputs.TAGS}" cannot have a mix of full name and non full name tags`);
+    }
+}
+
+function processImageAndRegistryPaths(
+    normalizedImage: string,
+    registry: string,
+    tagsList: string[]
+): { sourceImages: string[], destinationImages: string[] } {
+    const normalizedRegistry = registry.toLowerCase();
+    const registryWithoutTrailingSlash = normalizedRegistry.replace(/\/$/, "");
+    const registryPath = `${registryWithoutTrailingSlash}/${normalizedImage}`;
+    core.info(`Combining image name "${normalizedImage}" and registry "${registry}" `
+        + `to form registry path "${registryPath}"`);
+    if (normalizedImage.indexOf("/") > -1 && registry.indexOf("/") > -1) {
+        core.warning(`"${registryPath}" does not seem to be a typical registry path. `
+        + `Select few registries support paths containing more than two slashes. `
+        + `Refer to the Inputs section of the readme for naming image and registry.`);
+    }
+
+    sourceImages = tagsList.map((tag) => getFullImageName(normalizedImage, tag));
+    const destinationImages = tagsList.map((tag) => getFullImageName(registryPath, tag));
+
+    return { sourceImages, destinationImages };
+}
+
+function parsePodmanExtraArgs(inputExtraArgsStr: string): string[] {
+    const lines = splitByNewline(inputExtraArgsStr);
+    return lines.flatMap((line) => line.split(" ")).map((arg) => arg.trim());
+}
+
+function getPushMessage(destinationImages: string[], username?: string): string {
+    let pushMsg = `⏳ Pushing "${sourceImages.join(", ")}" to "${destinationImages.join(", ")}" respectively`;
+    if (username) {
+        pushMsg += ` as "${username}"`;
+    }
+    return pushMsg;
+}
+
+function validateCredentials(username?: string, password?: string): string {
+    let creds = "";
+    if (username && !password) {
+        core.warning("Username is provided, but password is missing");
+    }
+    else if (!username && password) {
+        core.warning("Password is provided, but username is missing");
+    }
+    else if (username && password) {
+        creds = `${username}:${password}`;
+    }
+    return creds;
+}
+
+async function pushImages(
+    destinationImages: string[],
+    isImageFromDocker: boolean,
+    isManifest: boolean,
+    manifestPushAll: boolean,
+    podmanExtraArgs: string[],
+    tlsVerify: string,
+    creds: string,
+    digestFile: string
+): Promise<void> {
+    const registryPathList: string[] = [];
+
+    for (let i = 0; i < destinationImages.length; i++) {
+        const args = [];
+        if (isImageFromDocker) {
+            args.push(...dockerPodmanOpts);
+        }
+        if (isManifest) {
+            args.push("manifest");
+        }
+        args.push(...[
+            "push",
+            "--quiet",
+            "--digestfile",
+            digestFile,
+            isImageFromDocker ? getFullDockerImageName(sourceImages[i]) : sourceImages[i],
+            destinationImages[i],
+        ]);
+        if (isManifest) {
+            args.push(`--all=${manifestPushAll ? "true" : "false"}`);
+        }
+        if (podmanExtraArgs.length > 0) {
+            args.push(...podmanExtraArgs);
+        }
+        if (tlsVerify) {
+            args.push(`--tls-verify=${tlsVerify}`);
+        }
+        if (creds) {
+            args.push(`--creds=${creds}`);
+        }
+
+        await execute(await getPodmanPath(), args);
+        core.info(`✅ Successfully pushed "${sourceImages[i]}" to "${destinationImages[i]}"`);
+
+        registryPathList.push(destinationImages[i]);
+
+        try {
+            const digest = (await fs.promises.readFile(digestFile)).toString();
+            core.info(digest);
+            core.setOutput(Outputs.DIGEST, digest);
+        }
+        catch (err) {
+            core.warning(`Failed to read digest file "${digestFile}": ${err}`);
+        }
+    }
+
+    core.setOutput(Outputs.REGISTRY_PATH, registryPathList[0]);
+    core.setOutput(Outputs.REGISTRY_PATHS, JSON.stringify(registryPathList));
 }
 
 async function execute(
