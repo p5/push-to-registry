@@ -81,7 +81,7 @@ async function run() {
             core.info(`Pushing image ${formatImage}`);
             await execute(await getPodmanPath(), [
                 "push",
-                "--compression-format " + format,
+                "--compression-format=" + format,
                 sourceImages[0],
                 formatImage,
             ]);
