@@ -115,11 +115,11 @@ async function run(): Promise<void> {
 
         for (const format of compressionFormats) {
             const formatTag = `${sourceImages[0]}-${format}`;
-            const formatImage = getFullImageName(sourceImages[0], formatTag);
+            const formatImage = getFullImageName(sourceImages[0], formatTag.replace(":", "-"));
             core.info(`Pushing image ${formatImage}`);
             await execute(await getPodmanPath(), [
-                "--compression-format " + format,
                 "push",
+                "--compression-format " + format,
                 sourceImages[0],
                 formatImage,
             ]);
