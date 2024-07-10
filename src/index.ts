@@ -26,9 +26,7 @@ interface ImageStorageCheckResult {
 let podmanPath: string | undefined;
 
 // boolean value to check if pushed image is from Docker image storage
-let isImageFromDocker = false;
 let sourceImages: string[];
-let destinationImages: string[];
 let dockerPodmanRoot: string;
 let dockerPodmanOpts: string[];
 
@@ -65,7 +63,6 @@ async function run(): Promise<void> {
     const isFullImageNameTag = isFullImageName(normalizedTagsList[0]);
     validateTags(normalizedTagsList, isFullImageNameTag);
 
-    let sourceImages: string[];
     let destinationImages: string[];
     if (!isFullImageNameTag) {
         if (!normalizedImage) {
@@ -75,8 +72,13 @@ async function run(): Promise<void> {
             throw new Error(`Input "${Inputs.REGISTRY}" must be provided when using non full name tags`);
         }
 
-        ({ sourceImages, destinationImages } = processImageAndRegistryPaths(normalizedImage, registry, normalizedTagsList));
-    } else {
+        ({ sourceImages, destinationImages } = processImageAndRegistryPaths(
+            normalizedImage,
+            registry,
+            normalizedTagsList,
+        ));
+    }
+    else {
         if (normalizedImage) {
             core.warning(`Input "${Inputs.IMAGE}" is ignored when using full name tags`);
         }
@@ -122,7 +124,7 @@ async function run(): Promise<void> {
             ]);
             manifestListImages.push({
                 format,
-                image: formatImage,
+                manifestImage: formatImage,
             });
         }
 
@@ -132,17 +134,18 @@ async function run(): Promise<void> {
         ]);
 
         // If format starts with "zstd", we need to add an annotation to the manifest list entry
-        for (const { format, image } of manifestListImages) {
-            core.info(`Adding ${image} to manifest list ${manifestListName} with format ${format}`);
-            const annotation = format.startsWith("zstd") ? `--annotation=io.github.containers.compression.zstd=true` : "";
+        for (const { format, manifestImage } of manifestListImages) {
+            core.info(`Adding ${manifestImage} to manifest list ${manifestListName} with format ${format}`);
+            const annotation = format.startsWith("zstd")
+                ? `--annotation=io.github.containers.compression.zstd=true`
+                : "";
             await execute(await getPodmanPath(), [
-                "manifest", "add", manifestListName, image, annotation,
+                "manifest", "add", manifestListName, manifestImage, annotation,
             ]);
         }
 
         isManagedManifest = true;
     }
-
 
     const inputExtraArgsStr = core.getInput(Inputs.EXTRA_ARGS);
     const podmanExtraArgs = parsePodmanExtraArgs(inputExtraArgsStr);
@@ -202,21 +205,24 @@ async function run(): Promise<void> {
                         + `will be pushed.`
                 );
                 isImageFromDocker = true;
-            } else {
+            }
+            else {
                 core.warning(
                     `The version of "${sourceImages[0]}" in the Podman image storage is more recent `
                         + `than the version in the Docker image storage. The image(s) from the Podman image `
                         + `storage will be pushed.`
                 );
             }
-        } else if (allTagsinDocker) {
+        }
+        else if (allTagsinDocker) {
             core.info(
                 `Tag "${sourceImages[0]}" was found in the Docker image storage, but not in the Podman `
                     + `image storage. The image(s) will be pulled into Podman image storage, pushed, and then `
                     + `removed from the Podman image storage.`
             );
             isImageFromDocker = true;
-        } else {
+        }
+        else {
             core.info(
                 `Tag "${sourceImages[0]}" was found in the Podman image storage, but not in the Docker `
                     + `image storage. The image(s) will be pushed from Podman image storage.`
@@ -224,7 +230,7 @@ async function run(): Promise<void> {
         }
     }
 
-    core.info(getPushMessage(sourceImages, destinationImages, username));
+    core.info(getPushMessage(destinationImages, username));
 
     const creds = validateCredentials(username, password);
 
@@ -237,14 +243,13 @@ async function run(): Promise<void> {
     }
 
     await pushImages(
-        sourceImages, 
-        destinationImages, 
-        isImageFromDocker, 
-        isManifest, 
+        destinationImages,
+        isImageFromDocker,
+        isManifest,
         !isManagedManifest,
-        podmanExtraArgs, 
-        tlsVerify, 
-        creds, 
+        podmanExtraArgs,
+        tlsVerify,
+        creds,
         digestFile
     );
 }
@@ -445,8 +450,8 @@ function validateTags(tagsList: string[], isFullImageNameTag: boolean): void {
 }
 
 function processImageAndRegistryPaths(
-    normalizedImage: string, 
-    registry: string, 
+    normalizedImage: string,
+    registry: string,
     tagsList: string[]
 ): { sourceImages: string[], destinationImages: string[] } {
     const normalizedRegistry = registry.toLowerCase();
@@ -460,7 +465,7 @@ function processImageAndRegistryPaths(
         + `Refer to the Inputs section of the readme for naming image and registry.`);
     }
 
-    const sourceImages = tagsList.map((tag) => getFullImageName(normalizedImage, tag));
+    sourceImages = tagsList.map((tag) => getFullImageName(normalizedImage, tag));
     const destinationImages = tagsList.map((tag) => getFullImageName(registryPath, tag));
 
     return { sourceImages, destinationImages };
@@ -471,7 +476,7 @@ function parsePodmanExtraArgs(inputExtraArgsStr: string): string[] {
     return lines.flatMap((line) => line.split(" ")).map((arg) => arg.trim());
 }
 
-function getPushMessage(sourceImages: string[], destinationImages: string[], username?: string): string {
+function getPushMessage(destinationImages: string[], username?: string): string {
     let pushMsg = `⏳ Pushing "${sourceImages.join(", ")}" to "${destinationImages.join(", ")}" respectively`;
     if (username) {
         pushMsg += ` as "${username}"`;
@@ -483,23 +488,24 @@ function validateCredentials(username?: string, password?: string): string {
     let creds = "";
     if (username && !password) {
         core.warning("Username is provided, but password is missing");
-    } else if (!username && password) {
+    }
+    else if (!username && password) {
         core.warning("Password is provided, but username is missing");
-    } else if (username && password) {
+    }
+    else if (username && password) {
         creds = `${username}:${password}`;
     }
     return creds;
 }
 
 async function pushImages(
-    sourceImages: string[], 
-    destinationImages: string[], 
-    isImageFromDocker: boolean, 
-    isManifest: boolean, 
+    destinationImages: string[],
+    isImageFromDocker: boolean,
+    isManifest: boolean,
     manifestPushAll: boolean,
-    podmanExtraArgs: string[], 
-    tlsVerify: string, 
-    creds: string, 
+    podmanExtraArgs: string[],
+    tlsVerify: string,
+    creds: string,
     digestFile: string
 ): Promise<void> {
     const registryPathList: string[] = [];
@@ -542,7 +548,8 @@ async function pushImages(
             const digest = (await fs.promises.readFile(digestFile)).toString();
             core.info(digest);
             core.setOutput(Outputs.DIGEST, digest);
-        } catch (err) {
+        }
+        catch (err) {
             core.warning(`Failed to read digest file "${digestFile}": ${err}`);
         }
     }
